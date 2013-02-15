@@ -85,6 +85,17 @@
             return nil;
         }
 
+        NSURL *directoryURL = [self.storeURL URLByDeletingLastPathComponent];
+        NSFileManager *fileManager = [NSFileManager defaultManager];
+        {
+            NSError *error=nil;
+            if (![fileManager createDirectoryAtPath:[directoryURL path] withIntermediateDirectories:YES attributes:nil
+                                          error:&error]) {
+                [self addError:error];
+                return nil;
+            }
+        }
+
         _persistentStoreCoordinator = [[NSPersistentStoreCoordinator alloc] initWithManagedObjectModel:self
                 .managedObjectModel];
         NSDictionary *options = @{
