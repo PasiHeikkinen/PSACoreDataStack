@@ -1,4 +1,4 @@
-POD::Spec.new do |s|
+Pod::Spec.new do |s|
   s.name = 'PSACoreDataStack'
   s.version = '0.0.1'
   s.license = 'MIT'
