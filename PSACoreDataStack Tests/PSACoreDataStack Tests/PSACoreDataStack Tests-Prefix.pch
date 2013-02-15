@@ -1,0 +1,7 @@
+//
+// Prefix header for all source files of the 'PSACoreDataStack Tests' target in the 'PSACoreDataStack Tests' project
+//
+
+#ifdef __OBJC__
+    #import <Cocoa/Cocoa.h>
+#endif
