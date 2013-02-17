@@ -42,4 +42,7 @@
 + (id)SQLiteStackWithModelName:(NSString *)modelName bundle:(NSBundle *)bundle;
 + (id)SQLiteStackWithModelName:(NSString *)modelName bundle:(NSBundle *)bundle URL:(NSURL *)url;
 
++ (id)InMemoryStackWithModelName:(NSString *)modelName;
++ (id)InMemoryStackWithModelName:(NSString *)modelName bundle:(NSBundle *)bundle;
+
 @end
