@@ -38,13 +38,12 @@
 {
     [super setUp];
     self.temporaryDirectory = [PSACoreDataStackTest createTemporaryDirectory];
-    NSBundle *bundle = [NSBundle bundleForClass:[PSACoreDataStackTest class]];
-    PSACoreDataStack *stack = [PSACoreDataStack stackWithModelName:@"TestModel" bundle:bundle storeURL:[self temporaryStoreURL]];
-    self.stack = stack; 
+    self.stack = [self createStack];
 }
 
 - (void)tearDown
 {
+    STAssertTrue([self.stack.errors count] == 0, @"no recorded errors");
     self.stack = nil;
     NSFileManager *fileManager = [NSFileManager defaultManager];
 
@@ -54,32 +53,47 @@
             NSLog(@"Failed to remove temporary directory: %@", [error description]);
         }
     }
-
     [super tearDown];
 }
 
-- (void)testStack
-{
-    PSACoreDataStack *stack = self.stack;
+- (void)testManagedObjectModel {
+    STAssertNotNil(self.stack.managedObjectModel, nil);
+}
 
-    STAssertEqualObjects(@"TestModel", stack.modelName, nil);
-    STAssertNotNil(stack.modelLocation, nil);
+- (void)testModelName {
+    STAssertEqualObjects(@"TestModel", self.stack.modelName, nil);
+}
 
-    NSManagedObjectModel *model = stack.managedObjectModel;
-    STAssertNotNil(model, nil);
-
-    NSDictionary *entities = [model entitiesByName];
+- (void)testModelEntity {
+    NSDictionary *entities = [self.stack.managedObjectModel entitiesByName];
     STAssertNotNil(entities[@"TestEntity"], nil);
-
-    NSManagedObjectContext *managedObjectContext = stack.managedObjectContext;
-    STAssertNotNil(managedObjectContext, nil);
-
-    NSEntityDescription *entityDescription = [NSEntityDescription entityForName:@"TestEntity" inManagedObjectContext:managedObjectContext];
-    STAssertNotNil(entityDescription, nil);
 }
 
 - (void)testManagedObjectContext {
     STAssertNotNil(self.stack.managedObjectContext, nil);
+}
+
+- (void)testEntityDescription {
+    NSEntityDescription *entityDescription = [NSEntityDescription entityForName:@"TestEntity"
+                                                         inManagedObjectContext:self.stack.managedObjectContext];
+    STAssertNotNil(entityDescription, nil);
+}
+
+- (void)testPersistence {
+    id newEntity = [NSEntityDescription insertNewObjectForEntityForName:@"TestEntity"
+                                                 inManagedObjectContext:self.stack.managedObjectContext];
+    [newEntity setValue:@"TestValue" forKey:@"text"];
+    [self.stack.managedObjectContext save:nil];
+
+    PSACoreDataStack *otherStack = [self createStack];
+    NSFetchRequest *request = [NSFetchRequest fetchRequestWithEntityName:@"TestEntity"];
+    NSArray *results = [otherStack.managedObjectContext executeFetchRequest:request error:nil];
+    STAssertEqualObjects(@[@"TestValue"], [results valueForKey:@"text"], nil);
+}
+
+- (PSACoreDataStack *)createStack {
+    NSBundle *bundle = [NSBundle bundleForClass:[PSACoreDataStackTest class]];
+    return [PSACoreDataStack SQLiteStackWithModelName:@"TestModel" bundle:bundle URL:[self temporaryStoreURL]];
 }
 
 - (NSURL *)temporaryStoreURL {

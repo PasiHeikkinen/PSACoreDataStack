@@ -26,14 +26,24 @@
 
 #import "PSACoreDataStack.h"
 
+typedef NSPersistentStore * (^AddPersistentStoreBlockType)(NSPersistentStoreCoordinator *coordinator, NSError **error);
+
 @interface PSACoreDataStack ()
-@property(nonatomic, readwrite)  NSManagedObjectModel *managedObjectModel;
-@property(nonatomic, readwrite)  NSPersistentStoreCoordinator *persistentStoreCoordinator;
-@property(nonatomic, copy)       NSURL *storeURL;
+
 @property(nonatomic, readwrite)  NSString *modelName;
 @property(nonatomic, readwrite)  NSBundle *bundle;
+@property(nonatomic, copy)       AddPersistentStoreBlockType addPersistentStoreBlock;
+
+@property(nonatomic, readwrite)  NSManagedObjectModel *managedObjectModel;
 @property(nonatomic, readwrite)  NSManagedObjectContext *managedObjectContext;
+@property(nonatomic, readwrite)  NSPersistentStoreCoordinator *persistentStoreCoordinator;
+
 @property(nonatomic, readwrite)  NSArray *errors;
+
+@property(nonatomic, readonly) NSURL *modelLocation;
+
+- (id)initWithModelName:(NSString *)modelName bundle:(NSBundle *)bundle block:(AddPersistentStoreBlockType)block;
+
 @end
 
 @implementation PSACoreDataStack
@@ -47,26 +57,54 @@
     return result;
 }
 
-- (id)initWithModelName:(NSString *)modelName bundle:(NSBundle *)bundle storeURL:(NSURL *)storeURL {
+- (id)initWithModelName:(NSString *)modelName bundle:(NSBundle *)bundle block:(AddPersistentStoreBlockType)block {
     self = [super init];
     if (self) {
         self.modelName = modelName;
         self.bundle = bundle;
-        self.storeURL = storeURL;
+        self.addPersistentStoreBlock = block;
     }
     return self;
 }
 
-+ (id)stackWithModelName:(NSString *)modelName bundle:(NSBundle *)bundle storeURL:(NSURL *)storeURL {
-    return [[self alloc] initWithModelName:modelName bundle:bundle storeURL:storeURL];
++ (id)stackWithModelName:(NSString *)modelName bundle:(NSBundle *)bundle {
+    return [self SQLiteStackWithModelName:modelName bundle:bundle];
 }
 
 + (id)stackWithModelName:(NSString *)modelName {
-    NSBundle *bundle = [NSBundle mainBundle];
-    NSURL *storeURL = [self storeURLWithBundle:bundle modelName:modelName extension:@"sqlite"];
-    return [self stackWithModelName:modelName bundle:bundle storeURL:storeURL];
+    return [self SQLiteStackWithModelName:modelName];
 }
 
++ (id)SQLiteStackWithModelName:(NSString *)modelName {
+    NSBundle *bundle = [NSBundle mainBundle];
+    return [self SQLiteStackWithModelName:modelName bundle:bundle];
+}
+
++ (id)SQLiteStackWithModelName:(NSString *)modelName bundle:(NSBundle *)bundle {
+    NSURL *url = [self storeURLWithBundle:bundle modelName:modelName extension:@"sqlite"];
+    return [self SQLiteStackWithModelName:modelName bundle:bundle URL:url];
+}
+
++ (id)SQLiteStackWithModelName:(NSString *)modelName bundle:(NSBundle *)bundle URL:(NSURL*)url {
+   AddPersistentStoreBlockType block = ^NSPersistentStore *(NSPersistentStoreCoordinator *coordinator, NSError **error) {
+       return [self addSQLitePersistentStoreToCoordinator:coordinator withStoreURL:url error:error];
+   };
+   return [[self alloc] initWithModelName:modelName bundle:bundle block:block];
+}
++ (id)InMemoryStackWithModelName:(NSString *)modelName bundle:(NSBundle *)bundle {
+    AddPersistentStoreBlockType block = ^NSPersistentStore *(NSPersistentStoreCoordinator *coordinator, NSError **error) {
+        return [self addInMemoryPersistentStoreToCoordinator:coordinator error:error];
+    };
+    return [[self alloc] initWithModelName:modelName bundle:bundle block:block];
+}
+
++ (id)InMemoryStackWithModelName:(NSString *)modelName {
+    NSBundle *bundle = [NSBundle mainBundle];
+    AddPersistentStoreBlockType block = ^NSPersistentStore *(NSPersistentStoreCoordinator *coordinator, NSError **error) {
+        return [self addInMemoryPersistentStoreToCoordinator:coordinator error:error];
+    };
+    return [[self alloc] initWithModelName:modelName bundle:bundle block:block];
+}
 
 - (NSURL *) modelLocation {
     return [self.bundle URLForResource:self.modelName withExtension:@"momd"];
@@ -85,33 +123,39 @@
             return nil;
         }
 
-        NSURL *directoryURL = [self.storeURL URLByDeletingLastPathComponent];
-        NSFileManager *fileManager = [NSFileManager defaultManager];
-        {
-            NSError *error=nil;
-            if (![fileManager createDirectoryAtPath:[directoryURL path] withIntermediateDirectories:YES attributes:nil
-                                          error:&error]) {
-                [self addError:error];
-                return nil;
-            }
-        }
-
         _persistentStoreCoordinator = [[NSPersistentStoreCoordinator alloc] initWithManagedObjectModel:self
                 .managedObjectModel];
-        NSDictionary *options = @{
-                NSMigratePersistentStoresAutomaticallyOption: @YES,
-                NSInferMappingModelAutomaticallyOption: @YES
-        };
         NSError *error = nil;
-        if (![_persistentStoreCoordinator addPersistentStoreWithType:NSSQLiteStoreType
-                                                       configuration:nil
-                                                                 URL:self.storeURL
-                                                             options:options
-                                                               error:&error]) {
+        if (!self.addPersistentStoreBlock(_persistentStoreCoordinator, &error)) {
             [self addError:error];
         }
     }
     return _persistentStoreCoordinator;
+}
+
++ (NSPersistentStore *)addSQLitePersistentStoreToCoordinator:(NSPersistentStoreCoordinator *)coordinator
+                                                withStoreURL:(NSURL *)storeURL error:(NSError **)error {
+    NSURL *directoryURL = [storeURL URLByDeletingLastPathComponent];
+    NSFileManager *fileManager = [NSFileManager defaultManager];
+    {
+        if (![fileManager createDirectoryAtPath:[directoryURL path] withIntermediateDirectories:YES attributes:nil
+                                      error:error]) {
+            return nil;
+        }
+    }
+    NSDictionary *options = @{
+            NSMigratePersistentStoresAutomaticallyOption : @YES,
+            NSInferMappingModelAutomaticallyOption : @YES
+    };
+    return [coordinator addPersistentStoreWithType:NSSQLiteStoreType
+                                     configuration:nil URL:storeURL
+                                           options:options
+                                             error:error];
+}
+
++ (NSPersistentStore *)addInMemoryPersistentStoreToCoordinator:(NSPersistentStoreCoordinator *)coordinator
+                                                         error:(NSError **)error {
+    return [coordinator addPersistentStoreWithType:NSInMemoryStoreType configuration:nil URL:nil options:nil error:error];
 }
 
 - (void)addError:(NSError *)error {

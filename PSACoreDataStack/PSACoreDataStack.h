@@ -30,19 +30,15 @@
 
 @property(nonatomic, readonly) NSString *modelName;
 @property(nonatomic, readonly) NSBundle *bundle;
-@property(nonatomic, readonly) NSURL *modelLocation;
 @property(nonatomic, readonly) NSManagedObjectModel *managedObjectModel;
 @property(nonatomic, readonly) NSManagedObjectContext *managedObjectContext;
 @property(nonatomic, readonly) NSArray *errors;
 
-+ (NSURL *)storeURLWithBundle:(NSBundle *)bundle modelName:(NSString *)modelName extension:(NSString *)extension;
-
-- (id)initWithModelName:(NSString *)modelName bundle:(NSBundle *)bundle storeURL:(NSURL *)storeURL;
-
-- (NSURL *)modelLocation;
-
-+ (id)stackWithModelName:(NSString *)modelName bundle:(NSBundle *)bundle storeURL:(NSURL *)storeURL;
-
 + (id)stackWithModelName:(NSString *)modelName;
++ (id)stackWithModelName:(NSString *)modelName bundle:(NSBundle *)bundle;
+
++ (id)SQLiteStackWithModelName:(NSString *)modelName;
++ (id)SQLiteStackWithModelName:(NSString *)modelName bundle:(NSBundle *)bundle;
++ (id)SQLiteStackWithModelName:(NSString *)modelName bundle:(NSBundle *)bundle URL:(NSURL *)url;
 
 @end
