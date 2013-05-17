@@ -27,6 +27,8 @@
 #import <Foundation/Foundation.h>
 #import <CoreData/CoreData.h>
 
+OBJC_EXPORT NSString *const PSACoreDataStackBackupWhenModelUpgradedUserDefaultsKey;
+
 @interface PSACoreDataStack : NSObject
 
 @property(nonatomic, readonly) NSString *modelName;

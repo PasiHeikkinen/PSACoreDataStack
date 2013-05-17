@@ -26,19 +26,21 @@
 
 #import "PSACoreDataStack.h"
 
-typedef NSPersistentStore * (^AddPersistentStoreBlockType)(NSPersistentStoreCoordinator *coordinator, NSError **error);
+typedef NSPersistentStore *(^AddPersistentStoreBlockType)(NSPersistentStoreCoordinator *coordinator, NSError **error);
+
+NSString *const PSACoreDataStackBackupWhenModelUpgradedUserDefaultsKey = @"PSACoreDataStackBackupWhenModelUpgraded";
 
 @interface PSACoreDataStack ()
 
-@property(nonatomic, readwrite)  NSString *modelName;
-@property(nonatomic, readwrite)  NSBundle *bundle;
-@property(nonatomic, copy)       AddPersistentStoreBlockType addPersistentStoreBlock;
+@property(nonatomic, readwrite) NSString *modelName;
+@property(nonatomic, readwrite) NSBundle *bundle;
+@property(nonatomic, copy) AddPersistentStoreBlockType addPersistentStoreBlock;
 
-@property(nonatomic, readwrite)  NSManagedObjectModel *managedObjectModel;
-@property(nonatomic, readwrite)  NSManagedObjectContext *managedObjectContext;
-@property(nonatomic, readwrite)  NSPersistentStoreCoordinator *persistentStoreCoordinator;
+@property(nonatomic, readwrite) NSManagedObjectModel *managedObjectModel;
+@property(nonatomic, readwrite) NSManagedObjectContext *managedObjectContext;
+@property(nonatomic, readwrite) NSPersistentStoreCoordinator *persistentStoreCoordinator;
 
-@property(nonatomic, readwrite)  NSArray *errors;
+@property(nonatomic, readwrite) NSArray *errors;
 
 @property(nonatomic, readonly) NSURL *modelLocation;
 
@@ -48,7 +50,7 @@ typedef NSPersistentStore * (^AddPersistentStoreBlockType)(NSPersistentStoreCoor
 
 @implementation PSACoreDataStack
 
-+ (NSURL *)storeURLWithBundle:(NSBundle *)bundle modelName:(NSString*)modelName extension:(NSString*) extension {
++ (NSURL *)storeURLWithBundle:(NSBundle *)bundle modelName:(NSString *)modelName extension:(NSString *)extension {
     NSFileManager *fileManager = [NSFileManager defaultManager];
     NSURL *result = [[fileManager URLsForDirectory:NSApplicationSupportDirectory inDomains:NSUserDomainMask] lastObject];
     result = [result URLByAppendingPathComponent:[bundle bundleIdentifier]];
@@ -85,12 +87,13 @@ typedef NSPersistentStore * (^AddPersistentStoreBlockType)(NSPersistentStoreCoor
     return [self SQLiteStackWithModelName:modelName bundle:bundle URL:url];
 }
 
-+ (id)SQLiteStackWithModelName:(NSString *)modelName bundle:(NSBundle *)bundle URL:(NSURL*)url {
-   AddPersistentStoreBlockType block = ^NSPersistentStore *(NSPersistentStoreCoordinator *coordinator, NSError **error) {
-       return [self addSQLitePersistentStoreToCoordinator:coordinator withStoreURL:url error:error];
-   };
-   return [[self alloc] initWithModelName:modelName bundle:bundle block:block];
++ (id)SQLiteStackWithModelName:(NSString *)modelName bundle:(NSBundle *)bundle URL:(NSURL *)url {
+    AddPersistentStoreBlockType block = ^NSPersistentStore *(NSPersistentStoreCoordinator *coordinator, NSError **error) {
+        return [self addSQLitePersistentStoreToCoordinator:coordinator withStoreURL:url error:error];
+    };
+    return [[self alloc] initWithModelName:modelName bundle:bundle block:block];
 }
+
 + (id)InMemoryStackWithModelName:(NSString *)modelName bundle:(NSBundle *)bundle {
     AddPersistentStoreBlockType block = ^NSPersistentStore *(NSPersistentStoreCoordinator *coordinator, NSError **error) {
         return [self addInMemoryPersistentStoreToCoordinator:coordinator error:error];
@@ -106,7 +109,7 @@ typedef NSPersistentStore * (^AddPersistentStoreBlockType)(NSPersistentStoreCoor
     return [[self alloc] initWithModelName:modelName bundle:bundle block:block];
 }
 
-- (NSURL *) modelLocation {
+- (NSURL *)modelLocation {
     return [self.bundle URLForResource:self.modelName withExtension:@"momd"];
 }
 
@@ -135,12 +138,24 @@ typedef NSPersistentStore * (^AddPersistentStoreBlockType)(NSPersistentStoreCoor
 
 + (NSPersistentStore *)addSQLitePersistentStoreToCoordinator:(NSPersistentStoreCoordinator *)coordinator
                                                 withStoreURL:(NSURL *)storeURL error:(NSError **)error {
+
     NSURL *directoryURL = [storeURL URLByDeletingLastPathComponent];
     NSFileManager *fileManager = [NSFileManager defaultManager];
     {
         if (![fileManager createDirectoryAtPath:[directoryURL path] withIntermediateDirectories:YES attributes:nil
-                                      error:error]) {
+                                          error:error]) {
             return nil;
+        }
+    }
+    {
+        NSUserDefaults *userDefaults = [NSUserDefaults standardUserDefaults];
+        if ([userDefaults boolForKey:PSACoreDataStackBackupWhenModelUpgradedUserDefaultsKey]) {
+            NSError *compatibilityError = nil;
+            BOOL result = [self isModelInPersistentStoreCoordinator:coordinator compatibleWithStoreAtURL:storeURL
+                                                              error:&compatibilityError];
+            if (!result) {
+                [self backupStoreAtURL:storeURL];
+            }            
         }
     }
     NSDictionary *options = @{
@@ -153,9 +168,60 @@ typedef NSPersistentStore * (^AddPersistentStoreBlockType)(NSPersistentStoreCoor
                                              error:error];
 }
 
++ (BOOL)backupStoreAtURL:(NSURL *)storeURL {
+    NSFileManager *fileManager = [NSFileManager defaultManager];
+    NSDate *date = [NSDate date];
+
+    const NSInteger retryAttempts = 10;
+    for (NSUInteger i = 0; i < retryAttempts; i++) {
+        NSURL *dstURL = [self backupURLForStoreURL:storeURL fromDate:date];
+        NSError *copyError = nil;
+        BOOL success = [fileManager copyItemAtURL:storeURL toURL:dstURL error:&copyError];
+        if (success) {
+            return YES;
+        } else {
+            // Should break unless error indicates that the file already exists.
+            date = [date dateByAddingTimeInterval:1.0];
+        }
+    }
+    return NO;
+}
+
++ (NSURL *)backupURLForStoreURL:(NSURL *)storeURL fromDate:(NSDate *)date {
+    NSURL *parentDirectoryURL = [storeURL URLByDeletingLastPathComponent];
+    NSString *lastPathComponent = [storeURL lastPathComponent];
+    NSString *fileName = [NSString stringWithFormat:@"%@-%@.%@", [lastPathComponent stringByDeletingPathExtension],
+                                                    [self ISO8601DateTimeStringFromDate:date], [lastPathComponent pathExtension]];
+    return [parentDirectoryURL URLByAppendingPathComponent:fileName];
+}
+
++ (NSString *)ISO8601DateTimeStringFromDate:(NSDate *)date {
+    return [[self ISO8601DateFormatter] stringFromDate:date];
+}
+
++ (NSDateFormatter *)ISO8601DateFormatter {
+    NSDateFormatter *result = [[NSDateFormatter alloc] init];
+    [result setDateFormat:@"YYYYMMdd'T'hhmmss'Z'"];
+    [result setTimeZone:[NSTimeZone timeZoneWithAbbreviation:@"GMT"]];
+    return result;
+}
+
 + (NSPersistentStore *)addInMemoryPersistentStoreToCoordinator:(NSPersistentStoreCoordinator *)coordinator
                                                          error:(NSError **)error {
     return [coordinator addPersistentStoreWithType:NSInMemoryStoreType configuration:nil URL:nil options:nil error:error];
+}
+
++ (BOOL)isModelInPersistentStoreCoordinator:(NSPersistentStoreCoordinator *)coordinator
+                   compatibleWithStoreAtURL:(NSURL *)storeURL
+                                      error:(NSError **)error {
+    NSDictionary *metadata = [NSPersistentStoreCoordinator metadataForPersistentStoreOfType:NSSQLiteStoreType
+                                                                                        URL:storeURL
+                                                                                      error:error];
+    if (metadata == nil) {
+        return NO;
+    }
+
+    return [[coordinator managedObjectModel] isConfiguration:nil compatibleWithStoreMetadata:metadata];
 }
 
 - (void)addError:(NSError *)error {
