@@ -225,7 +225,7 @@ NSString *const PSACoreDataStackBackupWhenModelUpgradedUserDefaultsKey = @"PSACo
 }
 
 - (void)addError:(NSError *)error {
-    if (!_errors) {
+    if (_errors) {
         self.errors = [self.errors arrayByAddingObject:error];
     } else {
         self.errors = @[error];
